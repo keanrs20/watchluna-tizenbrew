@@ -7,13 +7,20 @@
     </head>
     <body></body>
     <script>
-        /* WatchLuna TV wrapper (youtube-dummy pattern) + on-screen diagnostics.
-         * The small text bottom-left reports each stage; tell us what it says
-         * if something fails. */
+        /* WatchLuna TV wrapper.
+         * v1.0.3 strategy: load the site DIRECTLY first (real navigation passes
+         * Cloudflare where in-app fetch() 403s). Once the session has passed the
+         * challenge, its cookies let our background fetch succeed, so we then
+         * reopen the app in "injected" mode = site + userscript (adblock, D-pad
+         * shim, media keys). One early reload, then mod is active.
+         * If Cloudflare never yields, the app stays in plain direct mode. */
         var app = null;
         var mode = 'init';
+        var upgraded = false;
+        var upgradeTries = 0;
         var SITE = 'https://watchluna.com/';
         var MOD = 'https://cdn.jsdelivr.net/gh/keanrs20/watchluna-tizenbrew/userscript.js';
+        var FEAT = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no';
 
         function say(s) {
             try {
@@ -61,38 +68,42 @@
             return /Just a moment|cf-chl|challenge-platform|turnstile/i.test(html);
         }
 
-        function fallback(reason) {
-            try { app.close(); } catch (_) {}
-            say('fallback (' + reason + ') -> navigating directly...');
-            mode = 'hosted';
-            app = window.open(SITE, 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
-            if (!app) say('fallback FAILED: window.open returned null');
-        }
-
-        function doThing() {
-            say('fetching site...');
+        function tryUpgrade() {
+            if (upgraded || mode !== 'hosted') return;
+            upgradeTries++;
+            say('checking ad-block availability (try ' + upgradeTries + ')...');
             fetch(SITE, { cache: 'no-store' })
-                .then(function (r) { return r.text().then(function (t) { return { status: r.status, html: t }; }); })
+                .then(function (r) { return r.text().then(function (t) { return { s: r.status, h: t }; }); })
                 .then(function (res) {
-                    say('fetch ' + res.status + ' len=' + res.html.length);
-                    if (res.status !== 200 || res.html.length < 500 || looksChallenged(res.html)) { fallback('cf/challenge or http ' + res.status); return; }
-                    var parsed = new DOMParser().parseFromString(res.html, 'text/html');
+                    if (res.s !== 200 || res.h.length < 500 || looksChallenged(res.h)) {
+                        say('cf not satisfied yet (http ' + res.s + ') - staying in direct mode');
+                        return;
+                    }
+                    var parsed = new DOMParser().parseFromString(res.h, 'text/html');
                     injectInto(parsed);
+                    try { app.close(); } catch (_) {}
+                    app = window.open('about:blank', 'app', FEAT);
+                    if (!app) { say('upgrade failed: could not reopen window'); return; }
                     mode = 'injected';
+                    upgraded = true;
                     var doc = app.document;
                     doc.open();
                     doc.write(new XMLSerializer().serializeToString(parsed.doctype) + parsed.documentElement.outerHTML);
                     doc.close();
-                    say('page written into child window');
+                    say('mod active - page reloaded once');
                 })
-                .catch(function (e) { fallback('fetch error: ' + e.message); });
+                .catch(function (e) { say('upgrade check failed: ' + e.message); });
         }
 
         function openApp() {
-            say('opening child window...');
-            app = window.open('about:blank', 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
-            if (!app) { fallback('about:blank open returned null'); return; }
-            doThing();
+            say('opening site directly...');
+            app = window.open(SITE, 'app', FEAT);
+            if (!app) { say('window.open returned null - blocked'); return; }
+            mode = 'hosted';
+            say('site loading directly (ad-block enables itself when possible)');
+            setTimeout(tryUpgrade, 6000);
+            setTimeout(tryUpgrade, 25000);
+            setTimeout(tryUpgrade, 60000);
         }
 
         function run() { setTimeout(function () { document.body.click(); }, 50); }
@@ -101,8 +112,6 @@
             try {
                 if (!app) return;
                 if (mode === 'hosted') {
-                    /* external-origin child has no tizen object by design; only
-                     * check if it was closed */
                     if (app.closed) reload();
                 } else if (mode === 'injected') {
                     if (app.tizen === undefined) reload();
@@ -110,7 +119,7 @@
             } catch (_) {}
         }, 3000);
 
-        window.onclick = function () { openApp(); };
+        window.onclick = function () { if (mode === 'init') openApp(); };
 
         function exit() {
             try { app.close(); } catch (_) {}
@@ -120,7 +129,7 @@
         function reload() {
             try { app.close(); } catch (_) {}
             mode = 'init';
-            say('child closed -> restarting');
+            say('window closed -> restarting');
             run();
         }
 

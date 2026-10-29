@@ -7,22 +7,40 @@
     </head>
     <body></body>
     <script>
-        /* WatchLuna TV wrapper.
-         * v1.0.3 strategy: load the site DIRECTLY first (real navigation passes
-         * Cloudflare where in-app fetch() 403s). Once the session has passed the
-         * challenge, its cookies let our background fetch succeed, so we then
-         * reopen the app in "injected" mode = site + userscript (adblock, D-pad
-         * shim, media keys). One early reload, then mod is active.
-         * If Cloudflare never yields, the app stays in plain direct mode. */
+        /* WatchLuna TV wrapper v1.0.4 - diagnostics build.
+         * Same hosted-first strategy, but now EVERYTHING is logged to app
+         * storage (localStorage) with timestamps, and the log from the PREVIOUS
+         * run is shown on-screen for 6 seconds at startup. If the app ever
+         * closes by itself, reopening it shows what happened before it died.
+         * Also: Back key exits cleanly; restart loop is bounded at 3 tries. */
         var app = null;
         var mode = 'init';
         var upgraded = false;
         var upgradeTries = 0;
+        var restarts = 0;
+        var t0 = Date.now();
         var SITE = 'https://watchluna.com/';
         var MOD = 'https://cdn.jsdelivr.net/gh/keanrs20/watchluna-tizenbrew/userscript.js';
         var FEAT = 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no';
+        var LOGKEY = 'wllog';
+
+        function now() { return '+' + Math.round((Date.now() - t0) / 100) / 10 + 's'; }
+
+        function saveLog(lines) {
+            try { localStorage.setItem(LOGKEY, JSON.stringify({ t: Date.now(), lines: lines.slice(-80) })); } catch (e) {}
+        }
+        function loadLog() {
+            try { return JSON.parse(localStorage.getItem(LOGKEY) || 'null'); } catch (e) { return null; }
+        }
+
+        var logLines = [];
+        function log(s) {
+            logLines.push(now() + ' ' + s);
+            saveLog(logLines);
+        }
 
         function say(s) {
+            log(s);
             try {
                 var d = document.getElementById('st');
                 if (!d) {
@@ -34,7 +52,23 @@
                 d.textContent = s;
             } catch (e) {}
         }
+
         window.onerror = function (m, u, l) { say('ERR: ' + m + ' @' + (u || '?') + ':' + l); return false; };
+
+        window.addEventListener('unload', function () { log('PARENT-UNLOAD'); });
+        window.addEventListener('pagehide', function () { log('PARENT-PAGEHIDE'); });
+        document.addEventListener('visibilitychange', function () { log('parent visibility=' + document.visibilityState); });
+
+        function showPrevRun(done) {
+            var prev = loadLog();
+            if (!prev || !prev.lines || !prev.lines.length) { done(); return; }
+            var d = document.createElement('div');
+            d.style.cssText = 'position:fixed;left:20px;top:20px;color:#0f0;background:rgba(0,0,0,.85);font:13px monospace;padding:10px 14px;z-index:2147483647;max-width:90%;white-space:pre-wrap;';
+            var age = Math.round((Date.now() - prev.t) / 1000);
+            d.textContent = '=== last run (' + age + 's ago) ===\n' + prev.lines.join('\n');
+            document.body.appendChild(d);
+            setTimeout(function () { try { d.remove(); } catch (e) {} done(); }, 6000);
+        }
 
         function shimSource() {
             return '' +
@@ -96,40 +130,44 @@
         }
 
         function openApp() {
+            if (restarts >= 3) { say('giving up after 3 restarts - see log at next launch'); return; }
             say('opening site directly...');
             app = window.open(SITE, 'app', FEAT);
             if (!app) { say('window.open returned null - blocked'); return; }
             mode = 'hosted';
+            log('child window opened (hosted)');
             say('site loading directly (ad-block enables itself when possible)');
             setTimeout(tryUpgrade, 6000);
             setTimeout(tryUpgrade, 25000);
             setTimeout(tryUpgrade, 60000);
         }
 
-        function run() { setTimeout(function () { document.body.click(); }, 50); }
-
+        var lastClosed = false;
         setInterval(function () {
             try {
                 if (!app) return;
                 if (mode === 'hosted') {
-                    if (app.closed) reload();
+                    if (app.closed && !lastClosed) { log('CHILD-CLOSED by page/system (mode=hosted)'); lastClosed = true; reload(); }
+                    else if (!app.closed) { lastClosed = false; }
                 } else if (mode === 'injected') {
-                    if (app.tizen === undefined) reload();
+                    if (app.tizen === undefined) { log('injected child lost tizen -> reload'); reload(); }
                 }
-            } catch (_) {}
+            } catch (e) { log('watchdog err: ' + e.message); }
         }, 3000);
 
         window.onclick = function () { if (mode === 'init') openApp(); };
 
         function exit() {
+            log('exit() called (Back/Exit key)');
             try { app.close(); } catch (_) {}
             setTimeout(function () { tizen.application.getCurrentApplication().exit(); }, 150);
         }
 
         function reload() {
+            restarts++;
             try { app.close(); } catch (_) {}
             mode = 'init';
-            say('window closed -> restarting');
+            say('window closed -> restarting (' + restarts + '/3)');
             run();
         }
 
@@ -137,7 +175,18 @@
             if (evt.data && evt.data.action === 'exit') exit();
         });
 
-        say('boot');
-        run();
+        /* parent-side key handling (used when this window has focus) */
+        ['Back', 'Exit', 'MediaPlay', 'MediaPause', 'MediaStop'].forEach(function (k) {
+            try { tizen.tvinputdevice.registerKey(k); } catch (e) {}
+        });
+        document.addEventListener('keydown', function (e) {
+            log('parent key ' + e.keyCode);
+            if (e.keyCode === 10009 || e.keyCode === 10182 || e.keyCode === 10131) exit();
+        }, true);
+
+        function run() { setTimeout(function () { document.body.click(); }, 50); }
+
+        say('boot v1.0.4');
+        showPrevRun(run);
     </script>
 </html>

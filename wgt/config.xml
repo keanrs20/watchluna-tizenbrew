@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://watchluna.tv/WatchLuna" version="1.0.0" viewmodes="maximized">
+<widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://yourdomain/WatchLuna" version="1.0.1" viewmodes="maximized">
     <access origin="*" subdomains="true"></access>
-    <tizen:application id="watchlun.WatchLuna" package="watchlun" required_version="2.4" launch_mode="single"/>
+    <tizen:app-control>
+        <tizen:src name="index.html" reload="disable"/>
+        <tizen:operation name="http://tizen.org/appcontrol/operation/default"/>
+        <tizen:uri name=""/>
+		<tizen:mime name=""/>
+    </tizen:app-control>
+    <tizen:application id="watchluna0.WatchLuna" package="watchluna0" required_version="2.4" launch_mode="single"/>
     <content src="index.html"/>
     <feature name="http://tizen.org/feature/screen.size.all"/>
     <icon src="icon.png"/>

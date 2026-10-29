@@ -3,6 +3,16 @@
 Turns [watchluna.com](https://watchluna.com/) into a TV app inside
 [TizenBrew](https://github.com/reisxd/TizenBrew) on Samsung Tizen TVs.
 
+> **Two ways to use this repo:**
+> 1. **TizenBrew mod** (no build, recommended) — described below.
+> 2. **Standalone WatchLuna app** — prebuilt `WatchLuna_1.0.0.wgt` in the
+>    [Releases](../../releases) (source in `wgt/`), installed via Apps2Samsung
+>    → "Custom WGT File" with **Force Samsung Certificate + Partner Signing**
+>    enabled (Apps2Samsung signs it for your TV). Its own home-screen icon.
+>    The wgt loads this repo's `userscript.js` live from jsDelivr, so ad-block
+>    tweaks apply to both routes without rebuilding anything.
+
+
 What the module does (`userscript.js`, injected into the site):
 
 - **D-pad spatial navigation** fallback — if the site doesn't move focus itself, arrows jump to the nearest visible control. If the site handles its own focus, the mod stays out of the way.

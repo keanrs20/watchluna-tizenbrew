@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html bgcolor="black">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>WatchLuna</title>
+    </head>
+    <body></body>
+    <script>
+        /* WatchLuna TV wrapper - pattern borrowed from no-cover/youtube-dummy:
+         * open a second browsing context, fetch the site's HTML, inject our
+         * shim + the adblock/nav userscript (loaded live from jsDelivr, so
+         * ad-block rules update WITHOUT rebuilding this app), write it in.
+         * If the fetch is Cloudflare-challenged, fall back to a plain
+         * navigation so the site at least always opens. */
+        var app = null;
+        var SITE = 'https://watchluna.com/';
+        var MOD = 'https://cdn.jsdelivr.net/gh/keanrs20/watchluna-tizenbrew/userscript.js';
+
+        function shimSource() {
+            return '' +
+                'try{tizen.tvinputdevice.registerKey("Back");}catch(e){}' +
+                'try{tizen.tvinputdevice.registerKey("Exit");}catch(e){}' +
+                'document.addEventListener("keydown",function(e){' +
+                ' if(e.keyCode===10009){ if(history.length>1){history.back();}else{window.opener.postMessage({action:"exit"},"*");} e.preventDefault(); }' +
+                ' if(e.keyCode===10182||e.keyCode===10131){window.opener.postMessage({action:"exit"},"*");}' +
+                '},true);';
+        }
+
+        function injectInto(parsed) {
+            var s = parsed.createElement('script');
+            s.textContent = 'history.replaceState({}, "", ' + JSON.stringify(SITE) + ');' + shimSource();
+            parsed.head.appendChild(s);
+
+            var b = parsed.createElement('base');
+            b.href = SITE;
+            parsed.head.insertBefore(b, parsed.head.firstChild);
+
+            var m = parsed.createElement('script');
+            m.type = 'module';
+            m.textContent = "import('" + MOD + "?t=' + Date.now());";
+            parsed.head.appendChild(m);
+        }
+
+        function looksChallenged(html) {
+            return /Just a moment|cf-chl|challenge-platform|turnstile/i.test(html);
+        }
+
+        function fallback() {
+            try { app.close(); } catch (_) {}
+            app = window.open(SITE, 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
+        }
+
+        function doThing() {
+            fetch(SITE, { cache: 'no-store' })
+                .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
+                .then(function (html) {
+                    if (html.length < 500 || looksChallenged(html)) { fallback(); return; }
+                    var parsed = new DOMParser().parseFromString(html, 'text/html');
+                    injectInto(parsed);
+                    var doc = app.document;
+                    doc.open();
+                    doc.write(new XMLSerializer().serializeToString(parsed.doctype) + parsed.documentElement.outerHTML);
+                    doc.close();
+                })
+                .catch(function () { fallback(); });
+        }
+
+        function openApp() {
+            app = window.open('about:blank', 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
+            doThing();
+        }
+
+        function run() { setTimeout(function () { document.body.click(); }, 50); }
+
+        setInterval(function () { try { if (app.tizen === undefined) reload(); } catch (_) {} }, 2000);
+
+        window.onclick = function () { openApp(); };
+
+        function exit() {
+            try { app.close(); } catch (_) {}
+            setTimeout(function () { tizen.application.getCurrentApplication().exit(); }, 150);
+        }
+
+        function reload() {
+            try { app.close(); } catch (_) {}
+            run();
+        }
+
+        window.addEventListener('message', function (evt) {
+            if (evt.data && evt.data.action === 'exit') exit();
+        });
+
+        run();
+    </script>
+</html>

@@ -7,15 +7,27 @@
     </head>
     <body></body>
     <script>
-        /* WatchLuna TV wrapper - pattern borrowed from no-cover/youtube-dummy:
-         * open a second browsing context, fetch the site's HTML, inject our
-         * shim + the adblock/nav userscript (loaded live from jsDelivr, so
-         * ad-block rules update WITHOUT rebuilding this app), write it in.
-         * If the fetch is Cloudflare-challenged, fall back to a plain
-         * navigation so the site at least always opens. */
+        /* WatchLuna TV wrapper (youtube-dummy pattern) + on-screen diagnostics.
+         * The small text bottom-left reports each stage; tell us what it says
+         * if something fails. */
         var app = null;
+        var mode = 'init';
         var SITE = 'https://watchluna.com/';
         var MOD = 'https://cdn.jsdelivr.net/gh/keanrs20/watchluna-tizenbrew/userscript.js';
+
+        function say(s) {
+            try {
+                var d = document.getElementById('st');
+                if (!d) {
+                    d = document.createElement('div');
+                    d.id = 'st';
+                    d.style.cssText = 'position:fixed;left:8px;bottom:8px;color:#fff;background:rgba(0,0,0,.7);font:16px monospace;padding:6px 10px;z-index:2147483647;';
+                    document.body.appendChild(d);
+                }
+                d.textContent = s;
+            } catch (e) {}
+        }
+        window.onerror = function (m, u, l) { say('ERR: ' + m + ' @' + (u || '?') + ':' + l); return false; };
 
         function shimSource() {
             return '' +
@@ -24,7 +36,10 @@
                 'document.addEventListener("keydown",function(e){' +
                 ' if(e.keyCode===10009){ if(history.length>1){history.back();}else{window.opener.postMessage({action:"exit"},"*");} e.preventDefault(); }' +
                 ' if(e.keyCode===10182||e.keyCode===10131){window.opener.postMessage({action:"exit"},"*");}' +
-                '},true);';
+                '},true);' +
+                'var b=document.createElement("div");b.textContent="WatchLuna mod OK";' +
+                'b.style.cssText="position:fixed;left:8px;bottom:8px;color:#fff;background:rgba(0,0,0,.7);font:14px monospace;padding:4px 8px;z-index:2147483647;opacity:.9;";' +
+                'document.body.appendChild(b);setTimeout(function(){b.remove();},6000);';
         }
 
         function injectInto(parsed) {
@@ -32,9 +47,9 @@
             s.textContent = 'history.replaceState({}, "", ' + JSON.stringify(SITE) + ');' + shimSource();
             parsed.head.appendChild(s);
 
-            var b = parsed.createElement('base');
-            b.href = SITE;
-            parsed.head.insertBefore(b, parsed.head.firstChild);
+            var base = parsed.createElement('base');
+            base.href = SITE;
+            parsed.head.insertBefore(base, parsed.head.firstChild);
 
             var m = parsed.createElement('script');
             m.type = 'module';
@@ -46,34 +61,54 @@
             return /Just a moment|cf-chl|challenge-platform|turnstile/i.test(html);
         }
 
-        function fallback() {
+        function fallback(reason) {
             try { app.close(); } catch (_) {}
+            say('fallback (' + reason + ') -> navigating directly...');
+            mode = 'hosted';
             app = window.open(SITE, 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
+            if (!app) say('fallback FAILED: window.open returned null');
         }
 
         function doThing() {
+            say('fetching site...');
             fetch(SITE, { cache: 'no-store' })
-                .then(function (r) { if (!r.ok) throw new Error('http ' + r.status); return r.text(); })
-                .then(function (html) {
-                    if (html.length < 500 || looksChallenged(html)) { fallback(); return; }
-                    var parsed = new DOMParser().parseFromString(html, 'text/html');
+                .then(function (r) { return r.text().then(function (t) { return { status: r.status, html: t }; }); })
+                .then(function (res) {
+                    say('fetch ' + res.status + ' len=' + res.html.length);
+                    if (res.status !== 200 || res.html.length < 500 || looksChallenged(res.html)) { fallback('cf/challenge or http ' + res.status); return; }
+                    var parsed = new DOMParser().parseFromString(res.html, 'text/html');
                     injectInto(parsed);
+                    mode = 'injected';
                     var doc = app.document;
                     doc.open();
                     doc.write(new XMLSerializer().serializeToString(parsed.doctype) + parsed.documentElement.outerHTML);
                     doc.close();
+                    say('page written into child window');
                 })
-                .catch(function () { fallback(); });
+                .catch(function (e) { fallback('fetch error: ' + e.message); });
         }
 
         function openApp() {
+            say('opening child window...');
             app = window.open('about:blank', 'app', 'scrollbars=no,resizable=no,status=no,location=no,toolbar=no,menubar=no');
+            if (!app) { fallback('about:blank open returned null'); return; }
             doThing();
         }
 
         function run() { setTimeout(function () { document.body.click(); }, 50); }
 
-        setInterval(function () { try { if (app.tizen === undefined) reload(); } catch (_) {} }, 2000);
+        setInterval(function () {
+            try {
+                if (!app) return;
+                if (mode === 'hosted') {
+                    /* external-origin child has no tizen object by design; only
+                     * check if it was closed */
+                    if (app.closed) reload();
+                } else if (mode === 'injected') {
+                    if (app.tizen === undefined) reload();
+                }
+            } catch (_) {}
+        }, 3000);
 
         window.onclick = function () { openApp(); };
 
@@ -84,6 +119,8 @@
 
         function reload() {
             try { app.close(); } catch (_) {}
+            mode = 'init';
+            say('child closed -> restarting');
             run();
         }
 
@@ -91,6 +128,7 @@
             if (evt.data && evt.data.action === 'exit') exit();
         });
 
+        say('boot');
         run();
     </script>
 </html>

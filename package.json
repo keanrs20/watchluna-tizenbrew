@@ -1,0 +1,15 @@
+{
+  "name": "watchluna-tizenbrew",
+  "appName": "WatchLuna",
+  "version": "1.0.0",
+  "description": "WatchLuna on your Samsung TV - free movies & TV series with remote-friendly navigation.",
+  "packageType": "mods",
+  "websiteURL": "https://watchluna.com/",
+  "main": "userscript.js",
+  "evaluateScriptOnDocumentStart": true,
+  "author": "keanrs20",
+  "license": "MIT",
+  "repository": {
+    "url": "https://github.com/keanrs20/watchluna-tizenbrew"
+  }
+}
